@@ -1,0 +1,35 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "NODE_ENV"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build", "typegen"],
+      "inputs": ["**/*.ts", "**/*.tsx"]
+    },
+    "typegen": {
+      "cache": true,
+      "outputs": [".next/types/**/*.ts", ".next/dev/types/**/*.ts"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "dependsOn": ["^build"]
+    },
+    "clean": {
+      "cache": false,
+      "dependsOn": ["^clean"]
+    },
+    "//#fix": {
+      "cache": false
+    },
+    "//#check": {
+      "cache": false
+    }
+  }
+}

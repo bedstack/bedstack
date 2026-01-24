@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/yamcodes/bedstack/discussions
+    about: Use GitHub discussions for a message board-style forum for the project, discussing ideas, questions, etc.
+  - name: Q&A
+    url: https://github.com/yamcodes/bedstack/discussions/categories/q-a?discussions_q=
+    about: See the full list of questions and answers, or ask your own.
