@@ -1,0 +1,128 @@
+name: Preview www (bedstack.js.org)
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+  TURBO_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+  TZ: ${{ vars.TIMEZONE || 'Asia/Almaty' }}
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, labeled]
+    paths:
+      - "apps/www/**"
+      - "packages/**"
+      - ".github/workflows/preview-www.yml"
+      - "pnpm-lock.yaml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  Deploy-Preview:
+    if: |
+      (github.event.pull_request.draft == false || contains(github.event.pull_request.labels.*.name, 'preview')) &&
+      (github.event_name != 'pull_request' || github.event.action != 'labeled' || github.event.label.name == 'preview')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+      - name: Set Turbo base/head for PRs
+        run: |
+          echo "TURBO_SCM_BASE=${{ github.event.pull_request.base.sha || github.event.before }}" >> $GITHUB_ENV
+          echo "TURBO_SCM_HEAD=${{ github.sha }}" >> $GITHUB_ENV
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install
+      - name: Restore deploy metrics
+        uses: actions/cache@v4
+        with:
+          path: .github/deploy-metrics.json
+          key: deploy-metrics-v1
+      - name: Check preview deploy budget
+        id: budget
+        run: node .github/scripts/check-deploy-budget.cjs preview
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+      - name: Pull Vercel Environment Information
+        if: steps.budget.outputs.should_deploy == 'true'
+        run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build Project Artifacts
+        if: steps.budget.outputs.should_deploy == 'true'
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Deploy Project Artifacts to Vercel
+        if: steps.budget.outputs.should_deploy == 'true'
+        id: deploy
+        run: |
+          set -o pipefail
+          DEPLOYMENT_URL=$(vercel deploy --prebuilt --archive=tgz --token=${{ secrets.VERCEL_TOKEN }} | tail -n 1)
+          echo "DEPLOYMENT_URL=$DEPLOYMENT_URL" >> $GITHUB_OUTPUT
+      - name: Comment PR
+        if: github.event_name == 'pull_request' && steps.budget.outputs.should_deploy == 'true'
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const previewUrl = '${{ steps.deploy.outputs.DEPLOYMENT_URL }}';
+            const url = new URL(previewUrl);
+            const feedbackUrl = 'https://vercel.live/open-feedback/' + url.hostname + '?via=pr-comment-feedback-link';
+
+            const now = new Date();
+            const dateStr = now.toLocaleString('en-US', { 
+              month: 'short', 
+              day: 'numeric', 
+              year: 'numeric', 
+              hour: 'numeric', 
+              minute: '2-digit', 
+              hour12: true
+            }).replace(',', '') + ' (' + process.env.TZ + ')';
+
+            const comment = [
+              '[vc]: #DZOavKtcupv5eYfsJ0J5gTvtYR/BkSkF1UhfIwiSRtA=:eyJpc01vbm9yZXBvIjp0cnVlLCJ0eXBlIjoiZ2l0aHViIiwicHJvamVjdHMiOlt7Im5hbWUiOiJhcmtlbnYiLCJyb290RGlyZWN0b3J5IjoiYXBwcy93d3ciLCJsaXZlRmVlZGJhY2siOnsicmVzb2x2ZWQiOjAsInVucmVzb2x2ZWQiOjAsInRvdGFsIjowLCJsaW5rIjoiYXJrZW52LWdpdC1jb3BpbG90LXVwZGF0ZS1mb290ZXItY29weXJpZ2h0LXlhbWNvZGVzLnZlcmNlbC5hcHAifSwiaW5zcGVjdG9yVXJsIjoiaHR0cHM6Ly92ZXJjZWwuY29tL3lhbWNvZGVzL2Fya2Vudi8yN3dwSnY5RHBoQjZEQlNLOWVwc2NVQUh5Umd1IiwicHJldmlld1VybCI6ImFya2Vudi1naXQtY29waWxvdC11cGRhdGUtZm9vdGVyLWNvcHlyaWdodC15YW1jb2Rlcy12ZXJjZWwuYXBwIiwibmV4dENvbW1pdFN0YXR1cyI6IkRFUExPWUVEIn1dfQ==',
+              'The latest updates on your projects. Learn more about [Vercel for GitHub](https://vercel.link/github-learn-more).',
+              '',
+              '| Project | Deployment | Review | Updated (' + process.env.TZ + ') |',
+              '| :--- | :----- | :------ | :------ |',
+              '| [bedstack](https://vercel.com/yamcodes/bedstack) | ![Ready](https://vercel.com/static/status/ready.svg) [Ready](' + previewUrl + ') | [Preview](' + previewUrl + '), [Comment](' + feedbackUrl + ') | ' + dateStr + ' |'
+            ].join('\n');
+
+            try {
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+              });
+              
+              const botComment = comments.find(c =>
+                c.user?.login === 'github-actions[bot]' &&
+                c.body?.includes('The latest updates on your projects')
+              );
+              
+              if (botComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: botComment.id,
+                  body: comment,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: comment,
+                });
+              }
+            } catch (error) {
+              console.error('Failed to post PR comment:', error);
+            }
+      - name: Save deploy metrics
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .github/deploy-metrics.json
+          key: deploy-metrics-v1
