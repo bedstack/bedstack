@@ -21,16 +21,16 @@ jobs:
   Deploy-Production:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v6.1.0
+      - uses: pnpm/action-setup@v4.4.0
+      - uses: actions/setup-node@v6.5.0
         with:
           node-version: lts/*
           cache: pnpm
       - name: Install dependencies
         run: pnpm install
       - name: Restore deploy metrics
-        uses: actions/cache@v4
+        uses: actions/cache@v4.3.0
         with:
           path: .github/deploy-metrics.json
           key: deploy-metrics-v1
@@ -47,7 +47,7 @@ jobs:
         run: node .github/scripts/check-deploy-budget.cjs prod
       - name: Save deploy metrics
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v4.3.0
         with:
           path: .github/deploy-metrics.json
           key: deploy-metrics-v1
